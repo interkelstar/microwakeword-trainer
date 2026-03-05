@@ -1,0 +1,191 @@
+# =============================================================================
+# ru_jarvis.yaml — Wake word config for Russian "Джарвис"
+#
+# Usage:
+#   ./run_training.sh --config ru_jarvis.yaml
+#   ./run_training.sh --config ru_jarvis.yaml --phase train
+#   ./run_training.sh --config ru_jarvis.yaml --preview 5
+#
+# Copy this file and modify it to train a different wake word.
+# See ru_stop.yaml for another example.
+# =============================================================================
+
+# Name used for output files: <model_name>.onnx, <model_name>.tflite,
+# and the training subdirectory training/output/<model_name>/.
+# Keep it short, lowercase, ASCII-safe (no spaces or special chars).
+model_name: ru_jarvis
+
+# The exact phrase(s) the model should activate on.
+# Adding punctuation variants (!, ?) creates TTS clips with different
+# intonation — rising for "?", emphatic for "!" — which improves recall
+# across natural speech patterns.
+target_phrases:
+  - Джарвис
+  - Джарвис!
+  - Джарвис?
+
+training:
+  # Number of positive TTS clips to generate for training / validation.
+  # More samples = better generalisation but longer TTS generation time.
+  # 50k is a solid default; 25k is minimum viable, 100k+ for production.
+  n_samples: 50000
+  n_samples_val: 10000
+
+  # Total gradient steps. 500k is a good starting point.
+  # If the model underfits (low recall), increase to 750k–1M.
+  # If it overfits (high FP), keep at 500k and raise max_neg_weight instead.
+  steps: 500000
+
+  # False activation penalty (max_negative_weight in openWakeWord).
+  # Higher values make the model more conservative (fewer false positives
+  # but potentially lower recall). Start at 3000; raise to 5000–10000 if
+  # you get too many false activations in real use.
+  max_neg_weight: 3000
+
+# ---------------------------------------------------------------------------
+# Voices — Piper ONNX models from HuggingFace (rhasspy/piper-voices).
+#
+# Each entry maps a model filename (without .onnx) to its path suffix under
+# the base_url. The script downloads <base_url>/<suffix>/<name>.onnx.
+#
+# Browse available voices: https://huggingface.co/rhasspy/piper-voices
+# Use "medium" quality for good TTS at reasonable speed.
+# More voices = more speaker diversity = better model generalisation.
+# ---------------------------------------------------------------------------
+voices:
+  # Primary voices — used for positive clips AND same-language negative
+  # synthesis (adversarial phrases). Must match the target phrase language.
+  primary:
+    base_url: https://huggingface.co/rhasspy/piper-voices/resolve/main/ru/ru_RU
+    models:
+      ru_RU-dmitri-medium: dmitri/medium
+      ru_RU-denis-medium: denis/medium
+      ru_RU-irina-medium: irina/medium
+      ru_RU-ruslan-medium: ruslan/medium
+
+  # Secondary voices (optional) — used ONLY for cross-language negative
+  # phrases listed below (e.g. English words that sound similar to the
+  # wake word). Helps reduce false positives from TV, YouTube, podcasts.
+  # Remove this section entirely if you don't need cross-language negatives.
+  secondary:
+    base_url: https://huggingface.co/rhasspy/piper-voices/resolve/main
+    models:
+      en_US-amy-medium: en/en_US/amy/medium
+      en_US-john-medium: en/en_US/john/medium
+      en_GB-alan-medium: en/en_GB/alan/medium
+
+# ---------------------------------------------------------------------------
+# Adversarial negative phrases — words/phrases that are acoustically similar
+# to the target but should NOT trigger the model.
+#
+# These are synthesised as negative training examples. The model learns to
+# distinguish the wake word from these confusables, dramatically reducing
+# false activations.
+#
+# Tips for building a good negative list:
+#   - Include partial matches (first/last syllable of the wake word)
+#   - Include rhymes and words with the same onset consonant cluster
+#   - Include common household words, greetings, and commands
+#   - Include names of other voice assistants
+#   - Include words from other languages that sound similar (these should
+#     use Latin script and will be synthesised with secondary voices)
+#   - 50–100 phrases is a good range; more is fine
+# ---------------------------------------------------------------------------
+negative_phrases:
+  # Partial and near-matches
+  - Джар
+  - Ярвис
+  - Джарв
+  - Вис
+  # Same onset, different body
+  - Джек
+  - Джон
+  - Джим
+  - Джаз
+  - Джамал
+  # "Дж" onset words (TV/YouTube common)
+  - Джунгли
+  - Джентльмен
+  - Джинсы
+  - Джип
+  - Джокер
+  # Similar endings / rhymes
+  - Харвис
+  - Гарвис
+  - Нарвис
+  - Барвис
+  - Сервис
+  - Нервис
+  # "-вис/-ис" endings
+  - Завис
+  - Навис
+  - Повис
+  # "жа/жар" cluster
+  - Жарко
+  - Жалко
+  - Жаль
+  - Пожалуйста
+  - Пожар
+  - Жарить
+  - Уважаемый
+  # Similar-sounding proper nouns
+  - Маркус
+  - Артемис
+  - Дионис
+  - Анубис
+  - Алексис
+  # Russian assistant / device names
+  - Алиса
+  - Маруся
+  - Салют
+  - Компьютер
+  - Система
+  # Common one-word commands (false-activation sources)
+  - Привет
+  - Окей
+  - Стоп
+  - Хватит
+  - Начни
+  - Открой
+  - Вперёд
+  - Назад
+  - Помоги
+  - Хорошо
+  - Понял
+  # User-reported real-world triggers
+  - Джангл
+  - Джингл
+  - Щас
+  - Сжались
+  - Задержались
+  # Names starting with Д
+  - Дмитрий
+  - Дарья
+  - Денис
+  - Данила
+  - Диана
+  # Other two-syllable names
+  - Виктор
+  - Максим
+  - Кирилл
+  - Артём
+  - Антон
+  # Short greetings / phrases
+  - Добрый день
+  - Доброе утро
+  - Добрый вечер
+  # Commands
+  - Выключи
+  - Включи
+  - Переключи
+  # English words (TV/YouTube false-positive sources — synthesised with secondary voices)
+  - Jarring
+  - Charges
+  - Jargon
+  - Jungle
+  - Jingle
+  - Charles
+  - Largest
+  - Dangerous
+  - Gorgeous
+  - Sergeant
