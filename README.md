@@ -9,6 +9,46 @@ to run with [pymicro_wakeword](https://github.com/kahrendt/pymicro_wakeword)
 (used by [linux-voice-assistant](https://github.com/your-lva-repo)) and
 ESPHome on microcontrollers.
 
+## Background
+
+I built this because I wanted a custom Russian wake word — "Джарвис" (Jarvis)
+— for my home voice assistant.  Russian isn't supported by any of the
+off-the-shelf wake word solutions I found, and recording hundreds of your own
+voice clips felt like the wrong approach.  I wanted a fully synthetic training
+pipeline: pick your phrases, pick your voices, run the script, get a model.
+
+I started with [openWakeWord](https://github.com/interkelstar/openwakeword-trainer)
+and got something working, but the gap between training accuracy and real-world
+recall was frustrating.  Switching to microWakeWord's streaming CNN architecture
+gave much better results, and the model is a fraction of the size.
+
+The pipeline is fully language-agnostic — the Russian example configs are just
+that.  Any language with a [Piper](https://github.com/rhasspy/piper) voice
+model should work the same way.
+
+### Results on Russian "Джарвис"
+
+Trained on 50k TTS clips across 4 Russian voices (Dmitri, Denis, Irina, Ruslan),
+evaluated on 50 real recordings of the same person saying "Джарвис" naturally:
+
+| Metric | Result |
+|--------|--------|
+| Recall — 50 real recordings | **50 / 50 (100%)** |
+| Avg confidence on real speech | **0.996** |
+| Silent room, 5 minutes of ambient noise | **No trigger** (max avg 0.087) |
+| Production cutoff in daily use | **0.97** |
+| False positives after FP-mining retraining | ~2–3 / day (English TV) |
+| Model size | **82.5 KB** (streaming, uint8 quantised) |
+| Val accuracy | **99.77%** |
+
+The model was deployed and run continuously.  After one round of collecting
+66 real false-positive clips from daily use and retraining, the ambient
+false-positive score dropped from 0.385 to 0.087.  The remaining false
+positives are English words with a /dʒ/ onset (just, defence, ideas) —
+a second round of FP-mining should eliminate most of those.
+
+---
+
 ## Requirements
 
 - Linux (tested on Ubuntu 22.04, Debian 12, WSL2)
