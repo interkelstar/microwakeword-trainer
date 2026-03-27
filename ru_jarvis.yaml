@@ -1,19 +1,26 @@
 # =============================================================================
-# ru_jarvis.yaml — Wake word config for Russian "Джарвис"
+# ru_jarvis.yaml — Production config for Russian "Джарвис" (microWakeWord)
 #
 # Usage:
-#   ./run_training.sh --config ru_jarvis.yaml
-#   ./run_training.sh --config ru_jarvis.yaml --phase train
-#   ./run_training.sh --config ru_jarvis.yaml --preview 5
+#   ./run_mww.sh --config ru_jarvis.yaml
+#   ./run_mww.sh --config ru_jarvis.yaml --phase train
+#   ./run_mww.sh --config ru_jarvis.yaml --phase export
 #
-# Copy this file and modify it to train a different wake word.
-# See ru_stop.yaml for another example.
+# For a clean starting template, see example_ru_jarvis.yaml.
 # =============================================================================
 
-# Name used for output files: <model_name>.onnx, <model_name>.tflite,
+# Name used for output files: <model_name>_mww.tflite, <model_name>_mww.json,
 # and the training subdirectory training/output/<model_name>/.
 # Keep it short, lowercase, ASCII-safe (no spaces or special chars).
 model_name: ru_jarvis
+wake_word: "Джарвис"
+author: kelstar
+trained_languages: ["ru"]
+version: 2
+
+# Real recordings in record/ are used only for TESTING, not training.
+# Including them in training poisons positives with room-specific mic noise.
+train_with_recordings: false
 
 # The exact phrase(s) the model should activate on.
 # Adding punctuation variants (!, ?) creates TTS clips with different
@@ -30,17 +37,6 @@ training:
   # 50k is a solid default; 25k is minimum viable, 100k+ for production.
   n_samples: 50000
   n_samples_val: 10000
-
-  # Total gradient steps. 500k is a good starting point.
-  # If the model underfits (low recall), increase to 750k–1M.
-  # If it overfits (high FP), keep at 500k and raise max_neg_weight instead.
-  steps: 500000
-
-  # False activation penalty (max_negative_weight in openWakeWord).
-  # Higher values make the model more conservative (fewer false positives
-  # but potentially lower recall). Start at 3000; raise to 5000–10000 if
-  # you get too many false activations in real use.
-  max_neg_weight: 3000
 
 # ---------------------------------------------------------------------------
 # Voices — Piper ONNX models from HuggingFace (rhasspy/piper-voices).
@@ -189,3 +185,34 @@ negative_phrases:
   - Dangerous
   - Gorgeous
   - Sergeant
+
+# ---------------------------------------------------------------------------
+# microWakeWord architecture and training hyperparameters
+# ---------------------------------------------------------------------------
+microwakeword:
+  # --- Architecture ---
+  architecture: mixednet         # mixednet or inception
+  pointwise_filters: "64,64,64,64"
+  repeat_in_block: "1,1,1,1"
+  mixconv_kernel_sizes: "[5], [7,11], [9,15], [23]"
+  first_conv_filters: 32
+  first_conv_kernel_size: 5
+  stride: 3                      # temporal stride → 30ms per streaming output
+  spectrogram_length: 204        # input frames (computed: 50 final + 154 dropped by valid-padding)
+
+  # --- Training ---
+  training_steps: 20000
+  batch_size: 128
+  learning_rate: 0.001
+  positive_class_weight: 1.5
+  negative_class_weight: 1
+
+  # --- SpecAugment ---
+  time_mask_max_size: 5
+  time_mask_count: 2
+  freq_mask_max_size: 5
+  freq_mask_count: 2
+
+  # --- Output / Inference ---
+  probability_cutoff: 0.9
+  sliding_window_size: 10

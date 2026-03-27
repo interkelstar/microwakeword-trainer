@@ -1,119 +1,250 @@
-# openwakeword-trainer-ru
+# microWakeWord Trainer
 
-Train custom wake word models for [openWakeWord](https://github.com/dscripka/openWakeWord) using [Piper](https://github.com/rhasspy/piper) TTS — no microphone recordings needed.
+Config-driven pipeline for training custom wake word models using the
+[microWakeWord](https://github.com/kahrendt/microWakeWord) framework.
 
-The toolkit generates thousands of synthetic speech clips, augments them with real-world noise and room impulse responses, and trains a small DNN that runs in real time on a Raspberry Pi or any device supported by openWakeWord.
+microWakeWord trains a MixedNet/Inception streaming CNN that is exported as
+a fully quantised TFLite model.  The final model is 50–300 KB and is designed
+to run with [pymicro_wakeword](https://github.com/kahrendt/pymicro_wakeword)
+(used by [linux-voice-assistant](https://github.com/your-lva-repo)) and
+ESPHome on microcontrollers.
 
-## Included examples
+## Requirements
 
-| Config | Wake word | Language |
-|--------|-----------|----------|
-| `ru_jarvis.yaml` | Джарвис | Russian |
-| `ru_stop.yaml` | Стоп | Russian |
+- Linux (tested on Ubuntu 22.04, Debian 12, WSL2)
+- Python 3.9+ with pip
+- ~15 GB disk space for training data
+- NVIDIA GPU strongly recommended (training takes 8–14 hours on CPU)
+- Internet access for HuggingFace downloads
 
-## Prerequisites
-
-- **Linux x86_64** (tested on Ubuntu 22.04 / Debian 12, WSL2 works)
-- **Python 3.9+**
-- **~30 GB free disk** (virtual environment + training data + generated clips)
-- **GPU optional** — CUDA speeds up training (1–3 h vs 8–12 h on CPU); TTS generation is CPU-bound either way
-
-## Quick start
-
-```bash
-# 1. One-time setup: creates .venv/, downloads repos, installs dependencies
-chmod +x setup.sh && ./setup.sh
-
-# 2. Train a wake word (runs all phases sequentially)
-./run_training.sh --config ru_jarvis.yaml
-
-# 3. Output: ru_jarvis.onnx + ru_jarvis.tflite in the project root
-```
-
-## Usage
+## Quick Start
 
 ```bash
-# Run all phases
-./run_training.sh --config ru_jarvis.yaml
+# Clone the repo and set up the environment (one time only)
+git clone https://github.com/interkelstar/microwakeword-trainer.git
+cd microwakeword-trainer
+chmod +x setup_mww.sh && ./setup_mww.sh
 
-# Run a specific phase
-./run_training.sh --config ru_jarvis.yaml --phase train
+# Copy the example config and customise it for your wake word
+cp example_ru_jarvis.yaml my_wakeword.yaml
+# Edit my_wakeword.yaml: set model_name, target_phrases, voices, negatives
 
-# Skip the large ACAV100M feature download (if already present)
-./run_training.sh --config ru_jarvis.yaml --skip-features
-
-# Preview TTS output (generate 5 clips and save to preview/)
-./run_training.sh --config ru_jarvis.yaml --preview 5
+# Run the full training pipeline
+./run_mww.sh --config my_wakeword.yaml
 ```
 
-### Phases
+Output files created at the project root after training:
 
-| Phase | What it does | Time estimate |
-|-------|-------------|---------------|
-| `setup` | Writes the Piper generate_samples wrapper | seconds |
-| `voices` | Downloads Piper ONNX voice models from HuggingFace | 1–5 min |
-| `features` | Downloads ACAV100M + validation feature files (~7 GB) | 10–30 min |
-| `background` | Downloads MIT RIRs, AudioSet, FMA for noise augmentation | 10–30 min |
-| `generate` | Generates positive + negative TTS clips | 6–10 h (CPU) |
-| `augment` | Augments clips with noise, RIR, speed/pitch variation | 2–4 h |
-| `train` | Trains the DNN classifier | 1–3 h (GPU) / 8–12 h (CPU) |
-| `export` | Converts ONNX → TFLite | seconds |
+- `<model_name>_mww.tflite` — TFLite model ready for pymicro_wakeword
+- `<model_name>_mww.json` — Deployment manifest with inference parameters
 
-## Creating a config for a new wake word
+## Training Phases
 
-Copy one of the example configs and modify:
+The pipeline runs these phases in order:
+
+| Phase      | What it does                                                        | Time (CPU)  |
+|------------|---------------------------------------------------------------------|-------------|
+| `setup`    | Verify microwakeword, TF, pymicro_features are installed            | seconds     |
+| `voices`   | Download Piper ONNX voice models from HuggingFace                   | 1–5 min     |
+| `generate` | Synthesise positive + adversarial negative TTS clips via piper      | 6–10 hours  |
+| `features` | Extract pymicro_features spectrograms + download HF negatives       | 1–3 hours   |
+| `train`    | Build and train the MixedNet model with SpecAugment                 | 0.5–3 hours |
+| `export`   | Convert to streaming TFLite (uint8 quantised) + write JSON manifest | 5–15 min    |
+| `test`     | Evaluate TFLite model on test clips (optional, not run in "all")    | minutes     |
+
+Run individual phases with `--phase <name>`:
+
+```bash
+./run_mww.sh --config my_wakeword.yaml --phase train
+./run_mww.sh --config my_wakeword.yaml --phase export
+./run_mww.sh --config my_wakeword.yaml --phase test
+```
+
+## Config Reference
+
+See `example_ru_jarvis.yaml` for a fully annotated example. Key sections:
 
 ```yaml
-model_name: my_wake_word        # output filename (ASCII, no spaces)
+model_name: ru_jarvis        # Output filename prefix (ASCII, no spaces)
 
-target_phrases:                 # what the model should activate on
-  - My Wake Word
-  - My Wake Word!
-  - My Wake Word?
+target_phrases:              # What the model should fire on
+  - Джарвис
+  - Джарвис!
+  - Джарвис?
 
 training:
-  n_samples: 50000              # positive TTS clips (25k minimum)
-  n_samples_val: 10000
-  steps: 500000                 # gradient steps (increase if underfitting)
-  max_neg_weight: 3000          # false-positive penalty (increase if too many FPs)
+  n_samples: 50000           # TTS clips for training
+  n_samples_val: 10000       # TTS clips for validation
 
 voices:
-  primary:                      # must match target phrase language
-    base_url: https://huggingface.co/rhasspy/piper-voices/resolve/main/en/en_US
+  primary:                   # For positive clips + same-language negatives
+    base_url: https://huggingface.co/rhasspy/piper-voices/resolve/main/ru/ru_RU
     models:
-      en_US-amy-medium: amy/medium
-      en_US-john-medium: john/medium
+      ru_RU-dmitri-medium: dmitri/medium
+  secondary:                 # For cross-language negative phrases (optional)
+    base_url: https://huggingface.co/rhasspy/piper-voices/resolve/main
+    models:
+      en_US-amy-medium: en/en_US/amy/medium
 
-negative_phrases:               # acoustically similar words that should NOT trigger
-  - My Cake Bird
-  - Buy Lake Word
-  # ... 50–100 phrases recommended
+negative_phrases:            # Acoustically similar words to reject
+  - Джар
+  - Алиса
+  - Jarring                  # Latin script → synthesised with secondary voices
+
+microwakeword:
+  architecture: mixednet     # mixednet (default) or inception
+  spectrogram_length: 204    # input frames per inference window
+  stride: 3                  # frames consumed per streaming step (3 × 10ms = 30ms)
+  training_steps: 10000      # gradient steps
+  batch_size: 128
+  learning_rate: 0.001
+  positive_class_weight: 1.5 # raise if recall is too low
+  negative_class_weight: 1   # raise if false positive rate is too high
+  probability_cutoff: 0.9    # detection threshold (used at inference time)
+  sliding_window_size: 10    # averaging window size (used at inference time)
 ```
 
-Browse available voices at [rhasspy/piper-voices](https://huggingface.co/rhasspy/piper-voices).
+### Understanding spectrogram_length and stride
 
-## How it works
+microWakeWord uses pymicro_features to extract 40-bin mel spectrogram frames
+at 10 ms intervals.  The model processes `stride` frames per inference call
+and maintains a ring buffer of internal state.
 
-1. **TTS generation** — Piper synthesizes the target phrases (and adversarial negatives) across multiple voices with varying intonation
-2. **Augmentation** — clips are mixed with background audio (AudioSet, FMA), convolved with room impulse responses (MIT RIRs), and perturbed with speed/pitch changes
-3. **Feature extraction** — audio is converted to mel-spectrogram features matching openWakeWord's input format
-4. **Training** — a small fully-connected network learns to distinguish the wake word from background speech and similar-sounding words
-5. **Export** — the trained model is exported to ONNX and converted to TFLite for on-device deployment
+The `spectrogram_length` determines how many frames the model can look back
+when making each decision.  Larger values give more context but increase model
+size and training memory.
 
-## Cleanup
+`probability_cutoff` and `sliding_window_size` are used only at inference
+time — re-run `--phase export` after changing them.
+
+## Deployment
+
+Copy both output files to your linux-voice-assistant config directory:
 
 ```bash
-rm -rf .venv training/    # removes ~33 GB of intermediate files
+cp ru_jarvis_mww.tflite /path/to/linux-voice-assistant/models/
+cp ru_jarvis_mww.json   /path/to/linux-voice-assistant/models/
 ```
 
-The trained `.onnx` and `.tflite` files in the project root are your final models — copy them before cleaning up.
+The JSON manifest format:
 
-## Credits
+```json
+{
+  "type": "micro",
+  "wake_word": "Джарвис",
+  "model": "ru_jarvis_mww.tflite",
+  "micro": {
+    "probability_cutoff": 0.9,
+    "sliding_window_size": 10,
+    "feature_step_size": 10
+  }
+}
+```
 
-- [openWakeWord](https://github.com/dscripka/openWakeWord) by David Scripka — the wake word engine and training framework
-- [Piper](https://github.com/rhasspy/piper) by rhasspy — fast, local neural TTS
-- [piper-sample-generator](https://github.com/rhasspy/piper-sample-generator) — batch TTS clip generation
+The `type: micro` field is required — the linux-voice-assistant loader uses it
+to select the pymicro_wakeword inference backend.
+
+To change the detection threshold without retraining, edit `probability_cutoff`
+in the JSON file directly, or change it in your YAML and re-run `--phase export`.
+
+## Iterative Improvement — Reducing False Positives
+
+The most effective way to reduce false positives is to collect negative examples
+from your real environment and retrain.
+
+**Workflow:**
+
+1. Run the assistant for a day and note when it triggers incorrectly.
+2. Record the audio that caused false positives as a WAV file (16 kHz, mono).
+3. Copy the WAV to `training/output/<model_name>/user_negatives/`.
+4. Re-run feature extraction and training:
+
+```bash
+./run_mww.sh --config my_wakeword.yaml --phase features
+./run_mww.sh --config my_wakeword.yaml --phase train
+./run_mww.sh --config my_wakeword.yaml --phase export
+```
+
+The `user_negatives/` directory is processed with dense windowing (1 window
+per 10 ms) to maximise coverage of the triggering audio.
+
+**Important:** Do NOT put actual wake word recordings in `user_negatives/`.
+Only put audio that triggered incorrectly (TV speech, background noise, etc.).
+
+## Testing a Model
+
+Use `test_mww.py` to evaluate a trained model against WAV files.  The script
+simulates the exact pymicro_wakeword inference loop including the sliding
+window averaging:
+
+```bash
+# Test against all WAV files in record/
+.venv/bin/python3 test_mww.py
+
+# Test specific files
+.venv/bin/python3 test_mww.py record/sample1.wav record/sample2.wav
+
+# Output shows per-frame probabilities and a TRIGGERED / no trigger result
+```
+
+The model and config paths are hard-coded at the top of `test_mww.py` —
+edit `MODEL_PATH` and `CONFIG_PATH` if you use a different filename.
+
+## ElevenLabs High-Quality Positives (Optional)
+
+`generate_elevenlabs.py` generates additional high-quality TTS clips using the
+ElevenLabs API (requires an API key with credits).  These are automatically
+picked up during feature extraction and can improve the naturalness of the
+positive class:
+
+```bash
+.venv/bin/python generate_elevenlabs.py --api-key YOUR_KEY --config my_wakeword.yaml
+```
+
+Clips are saved to `training/output/<model_name>/elevenlabs_positive/`.
+
+## Disk Space
+
+After a full training run, the `training/` directory contains:
+
+```
+training/piper_binary/           # piper executable + shared libs (~150 MB)
+training/piper_models/           # ONNX voice models (~280 MB for 4 voices)
+training/output/<model_name>/
+  positive_train/                # TTS positive clips (~4 GB for 50k)
+  positive_test/                 # TTS validation clips (~800 MB for 10k)
+  negative_train/                # Adversarial negative TTS clips
+  negative_test/
+  elevenlabs_positive/           # ElevenLabs clips (optional)
+  user_negatives/                # Real environment negatives (optional)
+  mww_features/                  # Extracted spectrograms + HF negatives
+  model/                         # Saved Keras model weights
+```
+
+To clean up after training:
+
+```bash
+rm -rf .venv training/
+```
+
+## How It Works
+
+microWakeWord uses the pymicro_features frontend (matching the on-device
+inference pipeline on microcontrollers):
+
+1. Audio is chunked into 10 ms frames of 160 samples at 16 kHz.
+2. Each chunk is processed by `MicroFrontend` from the `pymicro-features`
+   package, producing a 40-bin log-mel spectrogram frame.
+3. The streaming model processes `stride` frames per call, maintaining internal
+   convolutional state across calls.
+4. A sliding window of `sliding_window_size` consecutive probabilities is
+   averaged; when the mean exceeds `probability_cutoff`, the wake word fires.
+
+**Feature scale:** pymicro_features outputs values in [0, ~26] (float32).
+This range must match at training time and inference time.  The HuggingFace
+negative dataset (`kahrendt/microwakeword`) uses a uint16 scale and is
+automatically rescaled to match during feature extraction.
 
 ## License
 
-[MIT](LICENSE)
+MIT

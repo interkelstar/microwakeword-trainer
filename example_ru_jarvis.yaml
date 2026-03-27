@@ -1,0 +1,249 @@
+# =============================================================================
+# example_ru_jarvis.yaml — Example config for training a Russian "Джарвис"
+#                          microWakeWord model
+#
+# This is a template. Copy it, rename it, and modify it for your own wake word.
+#
+# Usage:
+#   ./run_mww.sh --config example_ru_jarvis.yaml
+#   ./run_mww.sh --config example_ru_jarvis.yaml --phase voices
+#   ./run_mww.sh --config example_ru_jarvis.yaml --phase train
+# =============================================================================
+
+# Name used for output files:
+#   training/output/<model_name>/     — working directory
+#   <model_name>_mww.tflite           — trained TFLite model
+#   <model_name>_mww.json             — deployment manifest
+# Keep it short, lowercase, ASCII-safe (no spaces or special characters).
+model_name: ru_jarvis
+
+# Human-readable wake word label (may contain Unicode).
+wake_word: "Джарвис"
+
+# Your name or handle — written into the JSON manifest.
+author: yourname
+
+# BCP-47 language codes this model was trained for — written into the manifest.
+trained_languages: ["ru"]
+
+# Increment this when you retrain with improved data.
+version: 1
+
+# ---------------------------------------------------------------------------
+# Train with real recordings
+#
+# Set to true to include WAV files from the record/ directory as positive
+# training examples.  Set to false (default) to use only TTS clips.
+#
+# WARNING: recordings with ambient silence around the word will mix room-
+# specific mic noise into the positive class, which can hurt generalisation.
+# Keep false unless you have a large, diverse recording set.
+# ---------------------------------------------------------------------------
+train_with_recordings: false
+
+# ---------------------------------------------------------------------------
+# Target phrases
+#
+# The exact text the TTS engine will speak to create positive training examples.
+# Adding punctuation variants (!, ?) produces different TTS intonation:
+#   "Джарвис"  → neutral
+#   "Джарвис!" → emphatic
+#   "Джарвис?" → rising (question)
+# This diversity improves recall across natural speech patterns.
+# ---------------------------------------------------------------------------
+target_phrases:
+  - Джарвис
+  - Джарвис!
+  - Джарвис?
+
+# ---------------------------------------------------------------------------
+# Training data counts
+#
+# More clips = better generalisation but longer TTS generation time (~0.2s/clip).
+# ---------------------------------------------------------------------------
+training:
+  n_samples: 50000        # TTS clips for training (25k min, 100k+ for production)
+  n_samples_val: 10000    # TTS clips for validation
+
+# ---------------------------------------------------------------------------
+# Piper ONNX voice models
+#
+# The training pipeline downloads Piper voices from HuggingFace and uses the
+# standalone piper binary for TTS synthesis (no Python TTS library needed).
+#
+# Each entry maps a model filename (without .onnx) to its path under base_url.
+# Browse available voices: https://huggingface.co/rhasspy/piper-voices
+# Use "medium" quality for good TTS at reasonable synthesis speed.
+# More voices = more speaker diversity = better model generalisation.
+# ---------------------------------------------------------------------------
+voices:
+  # Primary voices — used for positive clips AND same-language negative synthesis.
+  # Must match the language of target_phrases.
+  primary:
+    base_url: https://huggingface.co/rhasspy/piper-voices/resolve/main/ru/ru_RU
+    models:
+      # filename (without .onnx): path suffix under base_url
+      ru_RU-dmitri-medium: dmitri/medium
+      ru_RU-denis-medium: denis/medium
+      ru_RU-irina-medium: irina/medium
+      ru_RU-ruslan-medium: ruslan/medium
+
+  # Secondary voices (optional) — used ONLY for cross-language negative phrases.
+  # For example, English words that sound similar to the Russian wake word.
+  # Remove this section if you don't need cross-language negatives.
+  secondary:
+    base_url: https://huggingface.co/rhasspy/piper-voices/resolve/main
+    models:
+      en_US-amy-medium: en/en_US/amy/medium
+      en_US-john-medium: en/en_US/john/medium
+      en_GB-alan-medium: en/en_GB/alan/medium
+
+# ---------------------------------------------------------------------------
+# Adversarial negative phrases
+#
+# These are synthesised as negative training examples.  The model learns to
+# distinguish the wake word from these confusable words.
+#
+# Tips:
+#   - Include partial matches (first/last syllable of the wake word)
+#   - Include rhymes and words with the same onset consonant cluster
+#   - Include common household words, greetings, and voice commands
+#   - Include other voice assistant names
+#   - Include Latin-script words that sound similar (for secondary voices)
+# ---------------------------------------------------------------------------
+negative_phrases:
+  # Partial and near-matches
+  - Джар
+  - Ярвис
+  - Джарв
+  - Вис
+  # Same onset, different body
+  - Джек
+  - Джон
+  - Джим
+  - Джаз
+  - Джамал
+  # "Дж" onset words (common on TV/YouTube)
+  - Джунгли
+  - Джентльмен
+  - Джинсы
+  - Джип
+  - Джокер
+  # Similar endings / rhymes
+  - Харвис
+  - Гарвис
+  - Сервис
+  # "жа/жар" consonant cluster
+  - Жарко
+  - Жаль
+  - Пожалуйста
+  - Пожар
+  # Similar-sounding proper nouns
+  - Маркус
+  - Артемис
+  - Алексис
+  # Other voice assistant names
+  - Алиса
+  - Маруся
+  - Салют
+  - Компьютер
+  # Common commands (false-activation sources)
+  - Привет
+  - Окей
+  - Стоп
+  - Хватит
+  - Начни
+  - Открой
+  - Помоги
+  - Хорошо
+  # Names starting with Д
+  - Дмитрий
+  - Дарья
+  - Денис
+  # Short greetings
+  - Добрый день
+  - Доброе утро
+  - Добрый вечер
+  # English words (TV/YouTube sources — synthesised with secondary voices)
+  - Jarring
+  - Charges
+  - Jargon
+  - Jungle
+  - Jingle
+  - Charles
+  - Largest
+  - Dangerous
+
+# ---------------------------------------------------------------------------
+# microWakeWord architecture and training hyperparameters
+# ---------------------------------------------------------------------------
+microwakeword:
+  # ---- Architecture -------------------------------------------------------
+  # "mixednet" is the standard microWakeWord architecture.
+  # "inception" is an alternative with different filter shapes.
+  architecture: mixednet
+
+  # MixedNet filter counts per block (comma-separated string).
+  # Default "64,64,64,64" works well for most wake words.
+  pointwise_filters: "64,64,64,64"
+
+  # Number of repeated blocks (comma-separated string).
+  repeat_in_block: "1,1,1,1"
+
+  # Mixed-depthwise kernel sizes per block.
+  mixconv_kernel_sizes: "[5], [7,11], [9,15], [23]"
+
+  # First convolutional layer parameters.
+  first_conv_filters: 32
+  first_conv_kernel_size: 5
+
+  # Temporal stride — controls how many frames are consumed per inference call.
+  # stride=3 → 30ms per output step (3 × 10ms feature step).
+  # Smaller stride = more frequent outputs, higher CPU usage.
+  stride: 3
+
+  # Spectrogram input length in frames.
+  # The model sees this many frames of context to make each decision.
+  # This value must match what pymicro_wakeword uses at inference time.
+  # Increasing this gives more context but raises model size and latency.
+  spectrogram_length: 204
+
+  # ---- Training -----------------------------------------------------------
+  # Total training steps (batches processed).
+  # 10k–20k is sufficient for most wake words with 50k TTS clips.
+  training_steps: 10000
+
+  # Batch size — reduce if you run out of GPU memory.
+  batch_size: 128
+
+  # Adam learning rate.
+  learning_rate: 0.001
+
+  # Class weights control the trade-off between false positives and misses.
+  # positive_class_weight > negative_class_weight → model biased toward recall.
+  # Increase positive weight if you miss too many detections.
+  # Increase negative weight if you have too many false positives.
+  positive_class_weight: 1.5
+  negative_class_weight: 1
+
+  # ---- SpecAugment --------------------------------------------------------
+  # Time and frequency masking during training to improve robustness.
+  # Masks random time/frequency bands, preventing the model from relying on
+  # any single frame or frequency bin.
+  time_mask_max_size: 5    # max width of each time mask in frames
+  time_mask_count: 2       # number of time masks per sample
+  freq_mask_max_size: 5    # max width of each frequency mask in bins
+  freq_mask_count: 2       # number of frequency masks per sample
+
+  # ---- Inference / Deployment ---------------------------------------------
+  # These values are written into <model_name>_mww.json and used by
+  # pymicro_wakeword at inference time.
+
+  # Detection threshold: mean probability over the sliding window must exceed
+  # this value to trigger the wake word.
+  # Lower = more sensitive (more false positives); higher = more conservative.
+  probability_cutoff: 0.9
+
+  # Number of consecutive inference windows to average over.
+  # Longer window = smoother output, less sensitive to brief noise spikes.
+  sliding_window_size: 10
