@@ -6,7 +6,7 @@ Config-driven pipeline for training custom wake word models using the
 microWakeWord trains a MixedNet/Inception streaming CNN that is exported as
 a fully quantised TFLite model.  The final model is 50–300 KB and is designed
 to run with [pymicro_wakeword](https://github.com/kahrendt/pymicro_wakeword)
-(used by [linux-voice-assistant](https://github.com/your-lva-repo)) and
+(used by [linux-voice-assistant](https://github.com/OHF-Voice/linux-voice-assistant)) and
 ESPHome on microcontrollers.
 
 ## Background
@@ -182,7 +182,9 @@ The JSON manifest format:
 ```
 
 The `type: micro` field is required — the linux-voice-assistant loader uses it
-to select the pymicro_wakeword inference backend.
+to select the pymicro_wakeword inference backend.  The exporter also writes
+`author`, `trained_languages`, `version`, `micro.tensor_arena_size`, and
+`micro.minimum_esphome_version` for ESPHome compatibility.
 
 To change the detection threshold without retraining, edit `probability_cutoff`
 in the JSON file directly, or change it in your YAML and re-run `--phase export`.
@@ -227,8 +229,19 @@ window averaging:
 # Output shows per-frame probabilities and a TRIGGERED / no trigger result
 ```
 
-The model and config paths are hard-coded at the top of `test_mww.py` —
-edit `MODEL_PATH` and `CONFIG_PATH` if you use a different filename.
+The default model and config paths are set at the top of `test_mww.py`;
+override them with `--model my_model_mww.tflite` (the JSON manifest is
+found automatically next to the model).
+
+Two companion tools help with false-positive mining:
+
+```bash
+# Batch-test a directory of FP clips at the production cutoff
+.venv/bin/python3 batch_test_fps.py --model my_model_mww.tflite fp_clips/
+
+# A/B compare two model versions on the same FP clips
+.venv/bin/python3 ab_test_fps.py old_mww.tflite new_mww.tflite fp_clips/
+```
 
 ## ElevenLabs High-Quality Positives (Optional)
 

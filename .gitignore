@@ -20,6 +20,17 @@ run_mww.sh
 
 # Training logs
 training_log*.txt
+log_*.txt
+
+# Local experiment snapshots and backups
+*.bak*
+*_mww.*.json
+organic_test/
+triage/
+
+# Local tooling config / session history
+litellm_config.yaml
+.remember/
 
 # Personal recording sessions
 record/

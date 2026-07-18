@@ -8,13 +8,11 @@ Simulates the exact pymicro_wakeword inference loop used by linux-voice-assistan
   - Maintains a sliding window of the last sliding_window_size probabilities
   - Triggers when mean(window) > probability_cutoff
 
-The model and config paths are set at the top of this file.  Edit MODEL_PATH
-and CONFIG_PATH if you use a different model name.
-
 Usage:
-  .venv/bin/python3 test_mww.py [WAV ...]
+  .venv/bin/python3 test_mww.py [--model MODEL.tflite] [--config MODEL.json] [WAV ...]
   .venv/bin/python3 test_mww.py record/sample*.wav
 
+Defaults to the MODEL_PATH / CONFIG_PATH set at the top of this file.
 If no WAV files are passed, all *.wav files in record/ are tested.
 Output shows per-inference-window probabilities and a TRIGGERED / no trigger result.
 """
@@ -148,9 +146,21 @@ def detect(wav_path: str, interp, probability_cutoff: float,
 
 
 def main():
-    wav_files = sys.argv[1:] if len(sys.argv) > 1 else sorted(pathlib.Path("record").glob("*.wav"))
+    global MODEL_PATH, CONFIG_PATH
+    import argparse
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("--model", default=str(MODEL_PATH), help="TFLite model path")
+    parser.add_argument("--config", default=None,
+                        help="JSON manifest path (default: model path with .json suffix)")
+    parser.add_argument("wavs", nargs="*", help="WAV files (default: record/*.wav)")
+    args = parser.parse_args()
+
+    MODEL_PATH = pathlib.Path(args.model)
+    CONFIG_PATH = pathlib.Path(args.config) if args.config else MODEL_PATH.with_suffix(".json")
+
+    wav_files = args.wavs if args.wavs else sorted(pathlib.Path("record").glob("*.wav"))
     if not wav_files:
-        print("Usage: python3 test_mww.py [WAV ...]")
+        print("Usage: python3 test_mww.py [--model MODEL.tflite] [WAV ...]")
         sys.exit(1)
 
     # Load config

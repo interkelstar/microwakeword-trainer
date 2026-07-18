@@ -1,6 +1,8 @@
 #!/usr/bin/env python3
 """
-Generate high-quality Russian wake word clips using ElevenLabs multilingual v2.
+Generate high-quality wake word clips using ElevenLabs multilingual v2.
+Works for any language supported by eleven_multilingual_v2 — the phrases
+come from your YAML config.
 
 Outputs WAV files (16kHz mono int16) into training/output/<model_name>/elevenlabs_positive/
 These get mixed into positive training data during feature extraction.
@@ -24,7 +26,7 @@ import yaml
 API_BASE = "https://api.elevenlabs.io/v1"
 
 # Voices to use — diverse set of male/female voices
-# All support Russian via eleven_multilingual_v2
+# All are multilingual via eleven_multilingual_v2
 VOICES = [
     ("CwhRBWXzGAHq8TQ4Fs17", "Roger"),      # male, laid-back
     ("EXAVITQu4vr4xnSDxMaL", "Sarah"),      # female, mature

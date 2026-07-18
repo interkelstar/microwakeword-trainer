@@ -75,7 +75,10 @@ PYTHON="$VENV_DIR/bin/python"
 # 3. Install microWakeWord from GitHub (brings TensorFlow + dependencies)
 # ---------------------------------------------------------------------------
 info "Installing microWakeWord..."
-"$PIP" install "git+https://github.com/kahrendt/microWakeWord.git" \
+# Pinned to a known-good commit — microWakeWord pulls in TensorFlow and its
+# API moves between commits. Bump deliberately, then retrain + retest.
+MWW_REF="a70bd740d4e79ee8a8bb3db843fe862b88d5d6b0"
+"$PIP" install "git+https://github.com/kahrendt/microWakeWord.git@${MWW_REF}" \
     || error "Failed to install microWakeWord. Check the GitHub repo."
 
 # ---------------------------------------------------------------------------
@@ -88,7 +91,12 @@ info "Installing additional dependencies..."
     "tqdm>=4.65.0" \
     "huggingface_hub>=0.20.0" \
     "PyYAML>=6.0" \
-    "numpy>=1.24.0,<2.0"
+    "numpy>=1.24.0,<2.0" \
+    "mmap_ninja>=0.8" \
+    "requests>=2.28"
+# mmap_ninja is required to read the HuggingFace negative dataset — without it
+# the features phase silently skips HF negatives and FP rate suffers.
+# requests is used by the optional generate_elevenlabs.py script.
 
 # ---------------------------------------------------------------------------
 # 5. Download Piper standalone binary (for TTS clip generation)
@@ -100,7 +108,7 @@ if [[ ! -f "$PIPER_BIN_DIR/piper/piper" ]]; then
     info "Downloading Piper binary (Linux x86_64)..."
     wget -q --show-progress \
         -O "$PIPER_BIN_DIR/piper_linux_x86_64.tar.gz" \
-        "https://github.com/rhasspy/piper/releases/latest/download/piper_linux_x86_64.tar.gz"
+        "https://github.com/rhasspy/piper/releases/download/2023.11.14-2/piper_linux_x86_64.tar.gz"
     tar -xzf "$PIPER_BIN_DIR/piper_linux_x86_64.tar.gz" -C "$PIPER_BIN_DIR"
     rm -f "$PIPER_BIN_DIR/piper_linux_x86_64.tar.gz"
     chmod +x "$PIPER_BIN_DIR/piper/piper"
@@ -124,6 +132,7 @@ checks = [
     ("yaml",             lambda: __import__("yaml").__version__),
     ("scipy",            lambda: __import__("scipy").__version__),
     ("tqdm",             lambda: __import__("tqdm").__version__),
+    ("mmap_ninja",       lambda: __import__("mmap_ninja") and "ok"),
 ]
 for name, fn in checks:
     try:

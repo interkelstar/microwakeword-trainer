@@ -114,6 +114,7 @@ def load_config(config_path: str) -> dict:
         "version": raw.get("version", 1),
         "target_phrases": raw["target_phrases"],
         "negative_phrases": raw.get("negative_phrases", []),
+        "train_with_recordings": bool(raw.get("train_with_recordings", False)),
 
         # Voice configuration
         "primary_voices_base_url": primary.get("base_url", ""),
@@ -135,14 +136,14 @@ def load_config(config_path: str) -> dict:
         "first_conv_filters": int(mww.get("first_conv_filters", 32)),
         "first_conv_kernel_size": int(mww.get("first_conv_kernel_size", 5)),
         "stride": int(mww.get("stride", 3)),
-        "spectrogram_length": int(mww.get("spectrogram_length", 49)),
+        "spectrogram_length": int(mww.get("spectrogram_length", 204)),
 
         # MWW training
         "training_steps": int(mww.get("training_steps", 10_000)),
         "batch_size": int(mww.get("batch_size", 128)),
         "learning_rate": float(mww.get("learning_rate", 0.001)),
-        "positive_class_weight": float(mww.get("positive_class_weight", 1)),
-        "negative_class_weight": float(mww.get("negative_class_weight", 20)),
+        "positive_class_weight": float(mww.get("positive_class_weight", 1.5)),
+        "negative_class_weight": float(mww.get("negative_class_weight", 1)),
         "clip_duration_ms": int(mww.get("clip_duration_ms", 1500)),
 
         # MWW SpecAugment
@@ -703,14 +704,14 @@ def phase_features(cfg: dict):
         #    WARNING: recordings with ambient silence around the word will
         #    poison positives with room-specific mic noise — use for test only.
         rec_dir = Path("record")
-        if cfg.get("train_with_recordings", True) and rec_dir.exists() and list(rec_dir.glob("*.wav")):
+        if cfg["train_with_recordings"] and rec_dir.exists() and list(rec_dir.glob("*.wav")):
             rec_feats = extract_features_from_dir(
                 rec_dir, "real_recordings", spec_length,
                 augment_stride=augment_stride, noise_augments=10,
             )
             pos_arrays.append(rec_feats)
             log.info("  Real recordings: %s", rec_feats.shape)
-        elif not cfg.get("train_with_recordings", True):
+        elif not cfg["train_with_recordings"]:
             log.info("  Real recordings: skipped (train_with_recordings=false)")
 
         pos_train = np.concatenate(pos_arrays, axis=0)
@@ -1303,7 +1304,7 @@ def main():
              cfg["stride"], cfg["stride"] * STEP_MS)
     log.info("  Training:        %d steps, batch=%d, lr=%.4f",
              cfg["training_steps"], cfg["batch_size"], cfg["learning_rate"])
-    log.info("  Class weights:   pos=%.0f, neg=%.0f",
+    log.info("  Class weights:   pos=%.1f, neg=%.1f",
              cfg["positive_class_weight"], cfg["negative_class_weight"])
     log.info("  Target phrases:  %s", cfg["target_phrases"])
     log.info("=" * 60)
