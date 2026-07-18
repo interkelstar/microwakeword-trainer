@@ -28,24 +28,28 @@ model should work the same way.
 
 ### Results on Russian "Джарвис"
 
-Trained on 50k TTS clips across 4 Russian voices (Dmitri, Denis, Irina, Ruslan),
-evaluated on 50 real recordings of the same person saying "Джарвис" naturally:
+Trained on 50k Piper TTS clips across 4 Russian voices (Dmitri, Denis, Irina,
+Ruslan) plus ElevenLabs positives (~314k positive / ~353k negative feature
+windows).  Evaluated on real audio held out of training: 50 organic
+activations recorded during daily use, and 140 mined hard false-positive
+clips (TV speech, clicks, knocks):
 
 | Metric | Result |
 |--------|--------|
-| Recall — 50 real recordings | **50 / 50 (100%)** |
-| Avg confidence on real speech | **0.996** |
-| Silent room, 5 minutes of ambient noise | **No trigger** (max avg 0.087) |
-| Production cutoff in daily use | **0.97** |
-| False positives after FP-mining retraining | ~2–3 / day (English TV) |
+| Recall — 50 real activations (held out of training) | **47 / 50 (94%)** |
+| False positives — 140 mined hard cases | **1 / 140** |
+| Previous model on the same test sets | 50/50 recall, but 91/140 FP |
+| Production cutoff in daily use | **0.9** |
 | Model size | **82.5 KB** (streaming, uint8 quantised) |
 | Val accuracy | **99.77%** |
 
-The model was deployed and run continuously.  After one round of collecting
-66 real false-positive clips from daily use and retraining, the ambient
-false-positive score dropped from 0.385 to 0.087.  The remaining false
-positives are English words with a /dʒ/ onset (just, defence, ideas) —
-a second round of FP-mining should eliminate most of those.
+The model runs continuously in production.  The biggest win came from
+FP-mining: collecting 208 real false-positive clips from daily use and
+re-extracting negative features with dense windowing (1 window per 10 ms)
+dropped hard-case false positives from 91/140 to 1/140.  Lowering the cutoff
+from 0.97 to 0.9 then recovered 5 more real activations at no measurable FP
+cost — the 3 remaining misses sit far below the threshold (~0.2–0.5) and are
+not recoverable by tuning alone.
 
 ---
 
