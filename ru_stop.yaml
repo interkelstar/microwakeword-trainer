@@ -1,0 +1,219 @@
+# =============================================================================
+# ru_stop.yaml — Russian "Стоп" stop-word for linux-voice-assistant
+#
+#   ./run_mww.sh --config ru_stop.yaml
+#
+# Why this model exists: the stock English stop.tflite cannot separate a
+# Russian "стоп" from room noise at any threshold or sliding_window_size —
+# both saturate at the model's quantized ceiling of 0.812. Measured over
+# three window sizes, 2026-08-02. See smart-home BACKLOG.md item V6.
+#
+# Design note — this is a STOP word, not a wake word, and the tolerance is
+# different. It is only armed while the device itself is speaking (roughly
+# 0.1% of the day, measured: 1 destructive event per 721 activations), so a
+# short common word is acceptable here in a way it would not be for a wake
+# word. That is also why words *containing* "стоп" (автостоп, стоп-кран) are
+# deliberately NOT listed as negatives: punishing them would cost recall for
+# no real-world gain during the tiny armed window.
+# =============================================================================
+
+model_name: ru_stop
+wake_word: "Стоп"
+author: kelstar
+trained_languages: ["ru"]
+version: 2
+
+train_with_recordings: false
+
+# Punctuation variants give the TTS different intonation — emphatic for "!",
+# rising for "?" — which matters here: a stop word is usually said sharply,
+# interrupting, not in a neutral register.
+target_phrases:
+  - Стоп
+  - Стоп!
+  - Стоп?
+
+training:
+  n_samples: 50000
+  n_samples_val: 10000
+
+voices:
+  primary:
+    base_url: https://huggingface.co/rhasspy/piper-voices/resolve/main/ru/ru_RU
+    models:
+      ru_RU-dmitri-medium: dmitri/medium
+      ru_RU-denis-medium: denis/medium
+      ru_RU-irina-medium: irina/medium
+      ru_RU-ruslan-medium: ruslan/medium
+
+  secondary:
+    base_url: https://huggingface.co/rhasspy/piper-voices/resolve/main
+    models:
+      en_US-amy-medium: en/en_US/amy/medium
+      en_US-john-medium: en/en_US/john/medium
+      en_GB-alan-medium: en/en_GB/alan/medium
+
+# ---------------------------------------------------------------------------
+# Adversarial negatives, chosen for THIS word.
+# "Стоп" is /stop/: an /st/ onset, a stressed /o/, and a final /p/ plosive.
+# The dangerous confusables are therefore (a) the very large "ст-" family in
+# Russian, (b) anything ending in "-оп", and (c) the "-стой/-стоит" cluster,
+# which is both acoustically near and extremely frequent in speech.
+# ---------------------------------------------------------------------------
+negative_phrases:
+  # Partial matches — the two halves of the word on their own
+  - Сто
+  - Топ
+  - Оп
+  - Опа
+  - Стоп-стоп     # rapid repetition, different envelope
+
+  # "-стой / -стоит" — nearest neighbours AND very common. Highest priority.
+  - Стой
+  - Стоит
+  - Стоил
+  - Стоило
+  - Постой
+  - Простой
+  - Пустой
+  - Густой
+  - Отстой
+  - Настой
+  - Достоин
+  - Стоя
+  - Стоял
+  - Стояли
+
+  # "ст-" onset, high-frequency household words
+  - Стол
+  - Стул
+  - Стало
+  - Старт
+  - Старый
+  - Стакан
+  - Стена
+  - Стиль
+  - Строй
+  - Струя
+  - Студия
+  - Станция
+  - Статья
+  - Стая
+  - Степь
+  - Стадион
+  - Странно
+  - Страшно
+  - Сторона
+  - Столько
+  - Стоны
+
+  # "-оп" endings and rhymes
+  - Хоп
+  - Поп
+  - Сноп
+  - Окоп
+  - Укроп
+  - Потоп
+  - Сироп
+  - Галоп
+  - Циклоп
+  - Микроскоп
+  - Телескоп
+  - Гороскоп
+  - Европа
+  - Утопия
+
+  # "сп-" cluster — same sibilant + plosive onset, different second element
+  - Спор
+  - Спорт
+  - Способ
+  - Спокойно
+  - Спасибо
+  - Спать
+  - Спросить
+
+  # Very high-frequency short words — the bulk of everyday speech, and the
+  # most likely source of the ambient false positives we measured
+  - Это
+  - Вот
+  - Что
+  - Так
+  - Как
+  - Тот
+  - Топот
+  - Потом
+  - Почти
+  - Просто
+  - Тогда
+  - Опять
+  - Потому
+
+  # Other assistants / the wake word itself — must never self-trigger
+  - Джарвис
+  - Алиса
+  - Маруся
+  - Салют
+  - Компьютер
+
+  # Other one-word commands that share the imperative register
+  - Хватит
+  - Отмена
+  - Тише
+  - Громче
+  - Дальше
+  - Повтори
+  - Выключи
+  - Включи
+  - Пауза
+  - Продолжи
+
+  # English near-misses from TV / YouTube. Deliberately excludes a bare
+  # "Stop": if it fires on an English stop that is a feature, not a fault.
+  - Top
+  - Shop
+  - Chop
+  - Swap
+  - Stopped
+  - Stove
+  - Store
+  - Storm
+  - Story
+  - Stock
+  - Step
+  - Stuck
+  - Desktop
+  - Laptop
+
+# ---------------------------------------------------------------------------
+# Architecture and hyperparameters — identical to the shipped ru_jarvis model,
+# which is a known-good configuration on this exact toolchain. Only the
+# inference-side values differ, and only where the stop word's job differs.
+# ---------------------------------------------------------------------------
+microwakeword:
+  architecture: mixednet
+  pointwise_filters: "64,64,64,64"
+  repeat_in_block: "1,1,1,1"
+  mixconv_kernel_sizes: "[5], [7,11], [9,15], [23]"
+  first_conv_filters: 32
+  first_conv_kernel_size: 5
+  stride: 3
+  spectrogram_length: 204
+
+  training_steps: 20000
+  batch_size: 128
+  learning_rate: 0.001
+  # Slightly higher than ru_jarvis's 1.5: missing a stop word is merely
+  # annoying, whereas a false one cuts the assistant off mid-sentence — but
+  # only during the armed window, which is tiny. Favour recall a little.
+  positive_class_weight: 2.0
+  negative_class_weight: 1
+
+  time_mask_max_size: 5
+  time_mask_count: 2
+  freq_mask_max_size: 5
+  freq_mask_count: 2
+
+  # Starting point only — the real cutoff gets set from live measurement
+  # after deployment, exactly as ru_jarvis went 0.97 → 0.9.
+  probability_cutoff: 0.9
+  sliding_window_size: 10

@@ -60,6 +60,13 @@ N_MEL_BINS = 40
 CHUNK_SAMPLES = 160        # 10 ms at 16 kHz — pymicro_features fixed step
 STEP_MS = 10               # feature extraction step matching pymicro_features
 
+# Concurrent Piper invocations during TTS generation. Leave a couple of cores
+# for everything else; override with MWW_GEN_WORKERS if a run needs to share
+# the machine. Capped because each worker holds its own ONNX model in RAM.
+GEN_WORKERS = int(os.environ.get("MWW_GEN_WORKERS", 0)) or max(
+    1, min(16, (os.cpu_count() or 4) - 2)
+)
+
 WORK_DIR = Path("training")
 MODELS_DIR = WORK_DIR / "piper_models"
 OUTPUT_DIR = WORK_DIR / "output"
@@ -479,17 +486,38 @@ def _generate_clips(phrases: list, voice_files: list, n_total: int,
     ]
     random.shuffle(combos)
 
+    # Piper reloads its ONNX model on every invocation, so a clip costs far
+    # more in process startup than in synthesis. Generating one at a time
+    # left 19 of 20 cores idle (~1.4 clips/s). Threads are enough here — each
+    # one only spawns a subprocess and waits on it, so the GIL is never the
+    # bottleneck and we avoid pickling the args to worker processes.
+    from concurrent.futures import ThreadPoolExecutor, wait, FIRST_COMPLETED
+
     generated, idx = 0, 0
     pbar = tqdm(total=remaining, desc=desc, unit="clip")
-    while generated < remaining:
+
+    def _submit(pool):
+        nonlocal idx
         phrase, voice, ls, ns, nw = combos[idx % len(combos)]
         idx += 1
         out_path = out_dir / f"{uuid.uuid4().hex}.wav"
-        if synthesize_clip(phrase, voice, out_path, ls, ns, nw):
-            generated += 1
-            pbar.update(1)
+        return pool.submit(synthesize_clip, phrase, voice, out_path, ls, ns, nw)
+
+    with ThreadPoolExecutor(max_workers=GEN_WORKERS) as pool:
+        # Keep roughly two tasks per worker in flight: enough to hide process
+        # startup, few enough that we overshoot the target by very little.
+        pending = {_submit(pool) for _ in range(min(GEN_WORKERS * 2, remaining))}
+        while pending and generated < remaining:
+            done, pending = wait(pending, return_when=FIRST_COMPLETED)
+            for fut in done:
+                if fut.result():
+                    generated += 1
+                    pbar.update(1)
+                if generated + len(pending) < remaining:
+                    pending.add(_submit(pool))
+
     pbar.close()
-    log.info("  %s: %d new clips", desc, generated)
+    log.info("  %s: %d new clips (%d workers)", desc, generated, GEN_WORKERS)
 
 
 def phase_generate(cfg: dict):
