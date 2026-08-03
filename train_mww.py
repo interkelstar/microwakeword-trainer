@@ -811,7 +811,19 @@ def phase_features(cfg: dict):
             "Generate adversarial clips (--phase generate) or ensure HF download works."
         )
 
-    all_neg = np.concatenate(neg_arrays, axis=0)
+    # np.concatenate holds the inputs and the result at the same time, so peak
+    # memory is twice the total. With densely-windowed user negatives the total
+    # reaches ~12 GB, and the doubling is enough to get the process OOM-killed
+    # with no traceback. Preallocate once and copy each source in, dropping it
+    # as soon as it is consumed.
+    total = sum(len(a) for a in neg_arrays)
+    all_neg = np.empty((total, *neg_arrays[0].shape[1:]), dtype=neg_arrays[0].dtype)
+    offset = 0
+    while neg_arrays:
+        chunk = neg_arrays.pop(0)
+        all_neg[offset:offset + len(chunk)] = chunk
+        offset += len(chunk)
+        del chunk
     np.random.shuffle(all_neg)
 
     split = int(len(all_neg) * 0.9)
