@@ -581,17 +581,18 @@ def phase_generate(cfg: dict):
     if latin and secondary_voices:
         # These share a directory with the Cyrillic negatives, and
         # _generate_clips treats its target as the total for that directory —
-        # so the Latin quota has to be added on top of what the Cyrillic pass
-        # already wrote. Passing the quota alone meant the count check saw
-        # 25000 >= 6250 and skipped cross-language negatives entirely.
+        # so the target has to be the combined quota. Passing the Latin quota
+        # alone meant the count check saw 25000 >= 6250 and skipped
+        # cross-language negatives entirely; deriving it from the current file
+        # count instead would add a fresh quota on every re-run.
         _generate_clips(
             latin, secondary_voices,
-            count_wav(base / "negative_train") + max(1, n_neg_train // 4),
+            n_neg_train + max(1, n_neg_train // 4),
             base / "negative_train", "neg_train_lat",
         )
         _generate_clips(
             latin, secondary_voices,
-            count_wav(base / "negative_test") + max(1, n_neg_val // 4),
+            n_neg_val + max(1, n_neg_val // 4),
             base / "negative_test", "neg_test_lat",
         )
 
