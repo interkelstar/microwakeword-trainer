@@ -926,10 +926,28 @@ def phase_features(cfg: dict):
         elif not cfg["train_with_recordings"]:
             log.info("  Real recordings: skipped (train_with_recordings=false)")
 
-        pos_train = np.concatenate(pos_arrays, axis=0)
+        # Same trap the negatives were already protected from: np.concatenate
+        # holds every input and the whole result at once, so peak memory is
+        # twice the total. That was survivable while positives were a single
+        # short-clip array; with channel augmentation each clip yields more
+        # windows and a second positive source was added, and the run that
+        # introduced them reached 42.6 GB resident and went into swap here.
+        # Preallocate once and drop each source as it is consumed.
+        total = sum(len(a) for a in pos_arrays)
+        pos_train = np.empty((total, *pos_arrays[0].shape[1:]), dtype=pos_arrays[0].dtype)
+        offset = 0
+        while pos_arrays:
+            chunk = pos_arrays.pop(0)
+            pos_train[offset:offset + len(chunk)] = chunk
+            offset += len(chunk)
+            del chunk
         np.random.shuffle(pos_train)
         np.save(str(pos_train_npy), pos_train)
         log.info("  positive_train.npy: %s (combined)", pos_train.shape)
+        # Locals live until the function returns, and the negative half of this
+        # phase is the memory-hungry part. Holding 14 GB of positives through it
+        # for no reason is what pushed the first attempt into swap.
+        del pos_train
 
     pos_val_npy = feat_dir / "positive_val.npy"
     if pos_val_npy.exists():
@@ -937,7 +955,15 @@ def phase_features(cfg: dict):
     else:
         d = base / "positive_test"
         if d.exists() and list(d.glob("*.wav")):
-            pos_val = extract_features_from_dir(d, "positive_val", spec_length)
+            # Augmented like the training positives, on purpose. Training stops
+            # on val_loss with restore_best_weights, so whatever this set looks
+            # like is what the final weights are chosen for. Held-out *clean*
+            # synthesis would select the model that is best at clean synthesis —
+            # which is precisely the failure being fixed: v2 scored 0.996 there
+            # and 0.000 on a person.
+            pos_val = extract_features_from_dir(
+                d, "positive_val", spec_length, noise_augments=2,
+            )
             np.save(str(pos_val_npy), pos_val)
             log.info("  positive_val.npy: %s", pos_val.shape)
         else:

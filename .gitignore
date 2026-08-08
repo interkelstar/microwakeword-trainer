@@ -40,3 +40,6 @@ record/
 
 # Local Claude Code config
 .claude/
+
+# Live progress indicator written by progress.sh — runtime state, not source.
+PROGRESS.txt

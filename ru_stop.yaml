@@ -21,7 +21,7 @@ model_name: ru_stop
 wake_word: "Стоп"
 author: kelstar
 trained_languages: ["ru"]
-version: 2
+version: 3
 
 train_with_recordings: false
 
@@ -214,9 +214,14 @@ microwakeword:
   freq_mask_count: 2
 
   # Starting point only — the real cutoff gets set from live measurement
-  # after deployment, exactly as ru_jarvis went 0.97 → 0.9.
+  # after deployment, exactly as ru_jarvis went 0.97 → 0.9. The daemon
+  # overwrites probability_cutoff from Home Assistant on every block, so this
+  # value is a default and not what runs.
   probability_cutoff: 0.9
-  sliding_window_size: 10
+  # The window IS read from this file at inference, and the deployed v2 model
+  # had it hand-edited to 3 after export while the manifest here still said 10.
+  # Exporting with 10 would silently change live behaviour.
+  sliding_window_size: 3
 
 # ---------------------------------------------------------------------------
 # Channel simulation.
