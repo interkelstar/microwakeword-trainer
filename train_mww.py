@@ -47,6 +47,7 @@ import types
 import uuid
 import zipfile
 from pathlib import Path
+from typing import Optional
 
 import numpy as np
 import yaml
@@ -122,6 +123,11 @@ def load_config(config_path: str) -> dict:
         "target_phrases": raw["target_phrases"],
         "negative_phrases": raw.get("negative_phrases", []),
         "train_with_recordings": bool(raw.get("train_with_recordings", False)),
+
+        # Room/noise channel simulation. Absent or disabled, training sees only
+        # the synthesiser's own output and learns that voice rather than the
+        # word — see ChannelAugmenter.
+        "augmentation": raw.get("augmentation", {}),
 
         # Voice configuration
         "primary_voices_base_url": primary.get("base_url", ""),
@@ -253,6 +259,151 @@ def _get_window(frames: np.ndarray, start: int, spec_length: int) -> np.ndarray:
     return window.astype(np.float32)
 
 
+_CHANNEL: "Optional[ChannelAugmenter]" = None
+
+
+class ChannelAugmenter:
+    """Put synthetic speech through a room, a loudspeaker and a microphone.
+
+    Without this the only augmentation is white noise, a speed change and a
+    gain change — none of which is a *channel*. A model trained that way learns
+    the synthesiser's voice rather than the word, and the failure is silent:
+    it scores 0.996 on held-out samples from the same synthesiser and 0.000 on
+    a person saying the word into a real microphone in the same room, which is
+    exactly what happened to ru_stop v2. Synthetic-set accuracy cannot detect
+    this, so it must not be relied on as the acceptance measure.
+
+    Two real corpora do the work, both already in ``training/``:
+
+    * ``mit_rirs/16khz`` — 270 measured room impulse responses. Convolving with
+      one puts the utterance in a room with that room's reverberation and
+      colouration, which is most of the difference between a TTS file and a
+      microphone recording.
+    * ``background/audioset`` — hours of real ambient recordings. Real noise
+      has structure that Gaussian noise does not; a model told only about white
+      noise treats any structured background as novel.
+
+    Reuse one instance: ``AddBackgroundNoise`` indexes its directory on
+    construction, and rebuilding it per clip dominates the run.
+    """
+
+    def __init__(self, rir_dir: Path, background_dir: Path, cfg: dict) -> None:
+        from audiomentations import AddBackgroundNoise, ApplyImpulseResponse, Compose
+
+        snr = cfg.get("background_snr_db", [-5, 20])
+        transforms = []
+
+        if rir_dir.is_dir() and any(rir_dir.glob("*.wav")):
+            transforms.append(ApplyImpulseResponse(
+                ir_path=str(rir_dir),
+                p=float(cfg.get("rir_probability", 0.7)),
+                leave_length_unchanged=True,
+            ))
+            log.info("  channel: %d room impulse responses from %s",
+                     len(list(rir_dir.glob("*.wav"))), rir_dir)
+        else:
+            log.warning("  channel: no RIRs in %s — rooms will not be simulated", rir_dir)
+
+        if background_dir.is_dir() and any(background_dir.rglob("*.wav")):
+            transforms.append(AddBackgroundNoise(
+                sounds_path=str(background_dir),
+                min_snr_db=float(snr[0]),
+                max_snr_db=float(snr[1]),
+                p=float(cfg.get("background_probability", 0.8)),
+            ))
+            log.info("  channel: background noise from %s at %s..%s dB SNR",
+                     background_dir, snr[0], snr[1])
+        else:
+            log.warning("  channel: no background noise in %s", background_dir)
+
+        self._compose = Compose(transforms) if transforms else None
+        beds = sorted(background_dir.rglob("*.wav")) if background_dir.is_dir() else []
+        self._background = beds or None
+
+    def __bool__(self) -> bool:
+        return self._compose is not None
+
+    def pad_to(self, audio: np.ndarray, n_samples: int) -> np.ndarray:
+        """Surround a short clip with real room sound out to n_samples.
+
+        The training window is 204 frames — 2.04 s — while a spoken «стоп» is
+        about 0.6 s, so two thirds of every positive is whatever fills the rest.
+        Padding the *features* with zeros, which is what happens by default,
+        fills it with a value no microphone can produce: real quiet measures
+        around 1-10 in these units, never 0. The model then learns "a word
+        surrounded by impossible values", and at inference the closest thing to
+        that is the near-silence the speaker's echo cancellation leaves while it
+        plays — which is exactly where ru_stop v2 fired at 0.4-0.99 with nobody
+        speaking.
+
+        Filling with real background instead makes the padding indistinguishable
+        from what the microphone delivers between words.
+        """
+        if len(audio) >= n_samples:
+            return audio
+        if self._background is None:
+            return audio
+
+        bed = self._background_bed(n_samples)
+        if bed is None:
+            return audio
+
+        # Random placement, so the model does not learn "the word starts at
+        # 0.7 s" alongside the word itself.
+        head = random.randint(0, max(0, n_samples - len(audio)))
+        out = bed.copy()
+        out[head:head + len(audio)] += audio
+        return out
+
+    def _background_bed(self, n_samples: int) -> "Optional[np.ndarray]":
+        import scipy.io.wavfile as wavfile
+
+        for _ in range(4):
+            path = random.choice(self._background)
+            try:
+                sr, data = wavfile.read(str(path))
+            except Exception:
+                continue
+            if data.ndim > 1:
+                data = data[:, 0]
+            if sr != SAMPLE_RATE or len(data) < n_samples:
+                continue
+            start = random.randint(0, len(data) - n_samples)
+            bed = data[start:start + n_samples].astype(np.float32)
+            # Keep the bed clearly under the word: this is padding, not the
+            # background-noise augmentation, which runs separately with its own
+            # SNR range.
+            peak = float(np.abs(bed).max()) or 1.0
+            return bed * (random.uniform(200.0, 1500.0) / peak)
+        return None
+
+    def apply(self, audio: np.ndarray) -> np.ndarray:
+        """audio: float32 in int16 units, as the rest of this file passes it."""
+        if self._compose is None:
+            return audio
+        # audiomentations works in [-1, 1]; scaling back afterwards keeps the
+        # caller's convention and the downstream clip to int16 range.
+        out = self._compose(samples=(audio / 32768.0).astype(np.float32),
+                            sample_rate=SAMPLE_RATE)
+        return out.astype(np.float32) * 32768.0
+
+
+def configure_channel_augmentation(cfg: dict) -> None:
+    """Build the shared augmenter from config, or leave it off."""
+    global _CHANNEL
+    aug = (cfg or {}).get("augmentation") or {}
+    if not aug.get("enabled", False):
+        log.info("  channel augmentation: disabled")
+        _CHANNEL = None
+        return
+    channel = ChannelAugmenter(
+        Path(aug.get("rir_dir", "training/mit_rirs/16khz")),
+        Path(aug.get("background_dir", "training/background")),
+        aug,
+    )
+    _CHANNEL = channel if channel else None
+
+
 def _augment_audio(audio: np.ndarray, n_augments: int = 3) -> list:
     """Create augmented copies of audio with noise and speed perturbation.
 
@@ -264,6 +415,11 @@ def _augment_audio(audio: np.ndarray, n_augments: int = 3) -> list:
 
     for _ in range(n_augments):
         aug = audio.astype(np.float32)
+
+        # Room and real background first, so the gain and white-noise steps
+        # below act on something that has already been through a channel.
+        if _CHANNEL is not None:
+            aug = _CHANNEL.apply(aug)
 
         # Random speed perturbation (±10%)
         if random.random() < 0.5:
@@ -339,7 +495,17 @@ def extract_features_from_dir(
             else:
                 audio_variants = [audio.astype(np.int16)]
 
+            # A clip shorter than the training window would otherwise be
+            # zero-padded in feature space; fill it with real room sound
+            # instead. See ChannelAugmenter.pad_to.
+            pad_target = (spec_length + 20) * CHUNK_SAMPLES
+
             for audio_var in audio_variants:
+                if _CHANNEL is not None:
+                    audio_var = np.clip(
+                        _CHANNEL.pad_to(audio_var.astype(np.float32), pad_target),
+                        -32768, 32767,
+                    ).astype(np.int16)
                 frames = extract_all_frames(audio_var)
                 n = len(frames)
 
@@ -698,6 +864,8 @@ def phase_features(cfg: dict):
     log.info("Phase: features — spectrogram extraction")
     log.info("=" * 60)
 
+    configure_channel_augmentation(cfg)
+
     model_name = cfg["model_name"]
     base = OUTPUT_DIR / model_name
     feat_dir = base / "mww_features"
@@ -726,14 +894,22 @@ def phase_features(cfg: dict):
         pos_arrays.append(piper_feats)
 
         # 2. ElevenLabs clips (high-quality TTS, if available) — light noise aug
-        el_dir = base / "elevenlabs_positive"
-        if el_dir.exists() and list(el_dir.glob("*.wav")):
-            el_feats = extract_features_from_dir(
-                el_dir, "elevenlabs_pos", spec_length,
-                augment_stride=augment_stride, noise_augments=3,
-            )
-            pos_arrays.append(el_feats)
-            log.info("  ElevenLabs positives: %s", el_feats.shape)
+        # Positives from other speech engines. Piper alone is a narrow slice of
+        # how a word can sound — ru_stop v2 learned its four `-medium` Russian
+        # voices well enough to score 0.996 on held-out Piper and 0.000 on a
+        # person. These directories hold the same word from unrelated
+        # synthesisers, so they get a higher augmentation count than the bulk
+        # Piper corpus: there are far fewer of them and they matter more.
+        for extra, label in (("elevenlabs_positive", "elevenlabs_pos"),
+                             ("ha_tts_positive", "ha_tts_pos")):
+            el_dir = base / extra
+            if el_dir.exists() and list(el_dir.glob("*.wav")):
+                el_feats = extract_features_from_dir(
+                    el_dir, label, spec_length,
+                    augment_stride=augment_stride, noise_augments=8,
+                )
+                pos_arrays.append(el_feats)
+                log.info("  %s positives: %s", label, el_feats.shape)
 
         # 3. Real recordings (if available in record/ directory)
         #    Only included if train_with_recordings: true in YAML.

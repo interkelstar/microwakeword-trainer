@@ -217,3 +217,29 @@ microwakeword:
   # after deployment, exactly as ru_jarvis went 0.97 → 0.9.
   probability_cutoff: 0.9
   sliding_window_size: 10
+
+# ---------------------------------------------------------------------------
+# Channel simulation.
+#
+# Version 2 had none of this, and the consequence was not subtle: it scored
+# 0.996 on held-out Piper «стоп» and 0.000 on nine recordings of the actual
+# user saying the word into the device's own microphone, in a quiet room, at
+# −26 dBFS. It had learned four synthetic voices, not a word. Synthetic-set
+# accuracy cannot see that failure — only held-out real audio can, which is
+# what voice/diagnostics/stopword_eval.py is for.
+#
+# The assets were already on disk and simply unused: 270 measured room impulse
+# responses and hours of real ambient recordings. Convolving with a real room
+# and adding real background is the difference between a clean TTS file and
+# something a microphone might actually deliver.
+# ---------------------------------------------------------------------------
+augmentation:
+  enabled: true
+  rir_dir: training/mit_rirs/16khz
+  background_dir: training/background
+  rir_probability: 0.7
+  # Deliberately wide, and reaching well below 0 dB: the stop word is said
+  # over the device's own speech and beside a ringing timer, so the cases that
+  # matter are the ones where the word is not the loudest thing present.
+  background_probability: 0.8
+  background_snr_db: [-5, 20]
