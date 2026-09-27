@@ -1003,6 +1003,23 @@ def phase_features(cfg: dict):
         neg_arrays.append(user_neg)
         log.info("  User negatives: %s", user_neg.shape)
 
+    # Spoken negatives from other synthesisers: the commands this device is
+    # actually given, and the words that sound like the target inside them.
+    # v4 stopped a timer and cut a spoken confirmation because it heard «стоп»
+    # inside «Поставь таймер через минуту» — a sentence the user says to it
+    # daily, and whose whole «постав-» family was missing from the negatives.
+    # Isolated words were there; sentences, where neighbours run together, were
+    # not. Augmented more heavily than the bulk corpus because there are far
+    # fewer of them and they are the hard cases.
+    tts_neg_dir = base / "ha_tts_negative"
+    if tts_neg_dir.exists() and list(tts_neg_dir.glob("*.wav")):
+        tts_neg = extract_features_from_dir(
+            tts_neg_dir, "ha_tts_negatives", spec_length,
+            augment_stride=augment_stride, noise_augments=4,
+        )
+        neg_arrays.append(tts_neg)
+        log.info("  Spoken-command negatives: %s", tts_neg.shape)
+
     # 3. HF negatives (speech, no_speech, dinner_party)
     hf_neg = _download_hf_negatives(feat_dir, spec_length, max_windows=500_000)
     if hf_neg is not None:

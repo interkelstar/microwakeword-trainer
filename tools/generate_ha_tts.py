@@ -100,7 +100,32 @@ def main() -> int:
     ap.add_argument("--engine", default="tts.google_cloud")
     ap.add_argument("--language", default="ru-RU")
     ap.add_argument("--limit", type=int, default=0, help="stop after N clips (0 = no limit)")
+    ap.add_argument("--phrases-file", type=Path,
+                    help="one phrase per line; blank lines and # comments ignored. "
+                         "Used for negatives — the things the device hears that are "
+                         "not the wake word")
+    ap.add_argument("--holdout", type=Path,
+                    help="second directory; voices are split between --out and this "
+                         "one so no voice appears in both. Without a split by voice, "
+                         "a model is tested on speakers it trained on and the number "
+                         "means nothing")
+    ap.add_argument("--speeds", default=None,
+                    help="comma-separated; default 0.85,1.0,1.15,1.35. For negatives "
+                         "breadth of phrases and voices matters more than of tempo, "
+                         "and the grid multiplies fast")
+    ap.add_argument("--pitches", default=None, help="comma-separated; default -4,0,4")
+    ap.add_argument("--holdout-voices", type=int, default=4,
+                    help="how many voices go to the holdout side")
     args = ap.parse_args()
+
+    speeds = [float(v) for v in args.speeds.split(",")] if args.speeds else SPEEDS
+    pitches = [float(v) for v in args.pitches.split(",")] if args.pitches else PITCHES
+
+    phrases = PHRASES
+    if args.phrases_file:
+        phrases = [ln.strip() for ln in args.phrases_file.read_text().splitlines()
+                   if ln.strip() and not ln.lstrip().startswith("#")]
+        print(f"{len(phrases)} phrases from {args.phrases_file}")
 
     token = os.environ.get("HA_TOKEN")
     if not token:
@@ -108,18 +133,26 @@ def main() -> int:
         return 2
 
     args.out.mkdir(parents=True, exist_ok=True)
+    if args.holdout:
+        args.holdout.mkdir(parents=True, exist_ok=True)
+    # Split by *voice*, not by clip: a held-out clip from a voice that is also in
+    # training measures memorisation of that speaker, not generalisation.
+    holdout_voices = set(GOOGLE_VOICES[-args.holdout_voices:]) if args.holdout else set()
+    if holdout_voices:
+        print(f"holdout voices: {', '.join(sorted(holdout_voices))}")
     made = skipped = failed = 0
 
     for voice in GOOGLE_VOICES:
+        target = args.holdout if voice in holdout_voices else args.out
         # A voice name the backend does not know fails identically for all 36
         # of its combinations, so one failure with nothing yet to its name is
         # enough to drop it.
         voice_ok = False
         voice_failed = 0
 
-        for phrase in PHRASES:
-            for speed in SPEEDS:
-                for pitch in PITCHES:
+        for phrase in phrases:
+            for speed in speeds:
+                for pitch in pitches:
                     if not voice_ok and voice_failed >= 2:
                         break
                     if args.limit and made >= args.limit:
@@ -129,7 +162,7 @@ def main() -> int:
                     options = {"voice": voice, "speed": speed, "pitch": pitch}
                     key = f"{args.engine}|{voice}|{phrase}|{speed}|{pitch}"
                     name = hashlib.sha1(key.encode()).hexdigest()[:16] + ".wav"
-                    dest = args.out / name
+                    dest = target / name
                     if dest.exists():
                         skipped += 1
                         voice_ok = True

@@ -1,0 +1,84 @@
+# Things this device actually hears that are not «стоп».
+#
+# ru_stop v4 stopped a timer and cut off a spoken confirmation because it heard
+# «стоп» inside «Поставь таймер через минуту» — a phrase the user says to it
+# every day. The «постав-» family was absent from the negatives entirely: the
+# list had «Постой», «Простой», «Стало», «Стакан», but nothing built on
+# «ставить», and no whole commands at all, only isolated words.
+#
+# An isolated word is not the same acoustic event as the same word inside a
+# sentence, said quickly, with its neighbours running into it. So both are here.
+
+# ---- the «став/стан» family, the direct cause ----
+Поставь
+Поставил
+Поставить
+Поставьте
+Ставь
+Ставить
+Оставь
+Оставил
+Оставить
+Останови
+Остановись
+Остановка
+Остальное
+Установи
+Установить
+Установка
+Расставь
+Доставь
+Подставь
+Приставь
+Наставь
+Заставь
+Состав
+Составь
+Восстанови
+Постановка
+Достаточно
+
+# ---- whole commands, said the way they are actually said ----
+Поставь таймер
+Поставь таймер на пять минут
+Поставь таймер на десять минут
+Поставь таймер через минуту
+Поставь таймер на минуту
+Поставь будильник
+Поставь будильник на семь утра
+Поставь музыку
+Останови таймер
+Останови музыку
+Отмени таймер
+Сколько осталось на таймере
+Джарвис, поставь таймер
+Джарвис, поставь таймер на три минуты
+Джарвис, останови таймер
+Джарвис, сколько времени
+Джарвис, какая погода
+Включи свет
+Включи свет в гостиной
+Выключи свет
+Выключи музыку
+Сделай тише
+Сделай громче
+Сколько времени
+Какая сегодня погода
+Что там по погоде
+Поставь чайник
+Напомни мне через час
+
+# ---- other near neighbours worth having with real voices ----
+Стой
+Стоит
+Постой
+Простой
+Пустой
+Стакан
+Столько
+Сто рублей
+Сто грамм
+Это всё
+Хватит
+Достаточно уже
+Спокойной ночи
